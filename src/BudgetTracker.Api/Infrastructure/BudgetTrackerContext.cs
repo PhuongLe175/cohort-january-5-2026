@@ -1,4 +1,5 @@
 using BudgetTracker.Api.Auth;
+using BudgetTracker.Api.Features.Transactions;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 
@@ -10,9 +11,27 @@ public class BudgetTrackerContext : IdentityDbContext<ApplicationUser>
     {
     }
 
+    public DbSet<Transaction> Transactions { get; set; }
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
 
+        modelBuilder.Entity<Transaction>(entity =>
+        {
+            entity.HasIndex(t => t.Date);
+            entity.HasIndex(t => t.UserId);
+            entity.HasIndex(t => t.ImportedAt);
+
+            entity.HasKey(e => e.Id);
+
+            entity.Property(e => e.Id)
+                .HasDefaultValueSql("gen_random_uuid()");
+
+            entity.HasOne<ApplicationUser>()
+                .WithMany()
+                .HasForeignKey(t => t.UserId)
+                .HasPrincipalKey(u => u.Id);
+        });
     }
 }
