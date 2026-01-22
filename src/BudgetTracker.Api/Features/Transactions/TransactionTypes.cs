@@ -54,7 +54,7 @@ public class TransactionDto
     public string Account { get; set; } = string.Empty;
 }
 
-internal static class TransactionExtensions
+public static class TransactionExtensions
 {
     public static TransactionDto MapToDto(this Transaction transaction)
     {
