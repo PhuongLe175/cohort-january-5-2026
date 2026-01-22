@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using BudgetTracker.Api.Auth;
 using BudgetTracker.Api.Infrastructure;
+using BudgetTracker.Api.Features.Transactions.Import.Processing;
 using BudgetTracker.Api.AntiForgery;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
@@ -20,7 +21,7 @@ public static class ImportApi
 
     private static async Task<Results<Ok<ImportResult>, BadRequest<string>>> ImportAsync(
         IFormFile file, [FromForm] string account,
-        BudgetTrackerContext context, ClaimsPrincipal claimsPrincipal)
+        CsvImporter csvImporter, BudgetTrackerContext context, ClaimsPrincipal claimsPrincipal)
     {
         var validationResult = ValidateFileInput(file, account);
         if (validationResult != null)
@@ -32,23 +33,20 @@ public static class ImportApi
         {
             var userId = claimsPrincipal.GetUserId();
 
-            // TODO: Implement CSV parsing in next step
-            // For now, return a placeholder response
-            var result = new ImportResult
+            using var stream = file.OpenReadStream();
+            var (result, transactions) = await csvImporter.ParseCsvAsync(stream, file.FileName, userId, account);
+
+            if (transactions.Any())
             {
-                TotalRows = 0,
-                ImportedCount = 0,
-                FailedCount = 0,
-                Errors = new List<string>(),
-                SourceFile = file.FileName,
-                ImportedAt = DateTime.UtcNow
-            };
+                await context.Transactions.AddRangeAsync(transactions);
+                await context.SaveChangesAsync();
+            }
 
             return TypedResults.Ok(result);
         }
         catch (Exception ex)
         {
-            return TypedResults.BadRequest(ex.Message);
+            return TypedResults.BadRequest($"Import failed: {ex.Message}");
         }
     }
 
