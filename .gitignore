@@ -170,3 +170,5 @@ Thumbs.db
 
 # Node modules in checkpoints
 checkpoints/**/node_modules/
+appsettings.Development.json
+docs/tasks

@@ -55,7 +55,7 @@ dotnet test
 dotnet run -p tests/BudgetTracker.Api.Tests --output detailed --filter-query "/path/to/test"
 
 # Database migrations (from src/BudgetTracker.Api/)
-dotnet ef migrations add MigrationName
+dotnet ef migrations add MigrationName -o Infrastructure/Migrations
 dotnet ef database update
 ```
 
@@ -81,6 +81,8 @@ npm preview
 ```bash
 # Start PostgreSQL with Docker (from docker/)
 docker compose up -d
+# or with Podman
+podman-compose up -d
 
 # Stop database
 docker compose down
