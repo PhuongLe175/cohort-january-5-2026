@@ -339,6 +339,53 @@ cohort-january-5-2026/
 - Update documentation for API changes
 - Use conventional commit messages
 
+## 🔁 How to stay in sync with the cohort
+
+There are **two valid ways** to move from one week to the next.
+
+Choose the one that best matches how you like to learn.
+
+---
+
+### Option 1. Keep going with your current code
+
+If you completed the previous week and your features work, you can continue with your existing code.
+
+- Your code does not need to match the checkpoint exactly.
+- The Tasks documents describe what to build, not a fixed implementation.
+- If you use a code assistant, it should adapt the instructions to your current codebase.
+
+This is intentional and part of the learning experience.
+
+As long as the functionality works, you are on track.
+
+---
+
+### Option 2. Realign with the cohort baseline
+
+If you want to start a new week from the same baseline as everyone else, use the checkpoint.
+
+Steps:
+
+1. Open the relevant `checkpoints/XX-week-end` folder.
+2. Copy the content.
+3. Replace your local root folder with it.
+4. Run the application and continue from there.
+
+No branch switching and no Git commands are required.
+
+---
+
+### How checkpoints work
+
+- The root folder is the original starting point of the cohort.
+- The root folder does not change during the cohort.
+- Each checkpoint is a snapshot of the project at the end of a given week.
+- Checkpoints are reference points, not the only correct solution.
+
+Both approaches are valid. Use checkpoints when you want alignment.  
+Keep your code when you want momentum.
+
 ## 🆘 Support
 
 If you encounter issues:

@@ -1,0 +1,30 @@
+@baseUrl = http://localhost:5295
+
+### Register a new user
+POST {{baseUrl}}/api/users/register
+Content-Type: application/json
+
+{
+  "email": "test@example.com",
+  "password": "Test123!",
+  "confirmPassword": "Test123!"
+}
+
+### Login
+# @name login
+POST {{baseUrl}}/api/users/login
+Content-Type: application/json
+
+{
+  "email": "test@example.com",
+  "password": "Test123!",
+  "useCookies": true
+}
+
+### Get current user info
+GET {{baseUrl}}/api/users/me
+Cookie: {{login.response.headers.Set-Cookie}}
+
+### Logout
+POST {{baseUrl}}/api/users/logout
+Cookie: {{login.response.headers.Set-Cookie}}

@@ -164,7 +164,7 @@ You've successfully set up:
 ✅ **API Credentials**: Endpoint and API key collected securely
 ✅ **Tested Access**: Verified the setup works via Azure AI Foundry
 
-**Next Step**: Move to [012-azure-ai-infrastructure.md](012-azure-ai-infrastructure.md) to configure your local environment and implement the AI service infrastructure.
+**Next Step**: Move to [012-ai-transaction-enhancement-backend.md](021-ai-transaction-enhancement-backend.md) to configure your local environment and implement the AI service infrastructure.
 
 ---
 
