@@ -1,0 +1,75 @@
+@baseUrl = http://localhost:5295
+
+### Test AI-Enhanced Import with Sample File
+POST http://localhost:5295/api/transactions/import
+X-API-Key: test-key-user1
+Content-Type: multipart/form-data; boundary=WebAppBoundary
+
+--WebAppBoundary
+Content-Disposition: form-data; name="account"
+
+Checking Account
+--WebAppBoundary
+Content-Disposition: form-data; name="file"; filename="sample.csv"
+Content-Type: text/csv
+
+Date,Description,Amount,Balance
+01/15/2025,AMZN,-45.67,1250.33
+01/16/2025,STARBUCKS COFFEE #1234,-5.89,1244.44
+01/17/2025,DD VODAFONE PORTU 222111000,-52.30,1192.14
+01/18/2025,NFLX Subscription,-15.99,1176.15
+--WebAppBoundary--
+
+### Apply Enhancements (use importSessionHash from import response)
+POST http://localhost:5295/api/transactions/import/enhance
+X-API-Key: test-key-user1
+Content-Type: application/json
+
+{
+  "importSessionHash": "C6691CC11C6E",
+  "enhancements": [
+    {
+      "transactionId": "aceb4a7c-22da-4f17-bcd5-062044867a5a",
+      "importSessionHash": "C6691CC11C6E",
+      "transactionIndex": 0,
+      "originalDescription": "AMZN",
+      "enhancedDescription": "Amazon Purchase",
+      "suggestedCategory": "Shopping",
+      "confidenceScore": 0.85
+    },
+    {
+      "transactionId": "a5dea5ca-a34a-4bce-9514-6649eaa71374",
+      "importSessionHash": "C6691CC11C6E",
+      "transactionIndex": 1,
+      "originalDescription": "STARBUCKS COFFEE #1234",
+      "enhancedDescription": "Starbucks Coffee",
+      "suggestedCategory": "Food & Drink",
+      "confidenceScore": 0.95
+    },
+    {
+      "transactionId": "0494d6e6-a4be-4186-ae32-6191da46cfa4",
+      "importSessionHash": "C6691CC11C6E",
+      "transactionIndex": 2,
+      "originalDescription": "DD VODAFONE PORTU 222111000",
+      "enhancedDescription": "Vodafone Portugal - Direct Debit",
+      "suggestedCategory": "Utilities",
+      "confidenceScore": 0.9
+    },
+    {
+      "transactionId": "3eb5c503-b539-479a-acde-bd1b93034f29",
+      "importSessionHash": "C6691CC11C6E",
+      "transactionIndex": 3,
+      "originalDescription": "NFLX Subscription",
+      "enhancedDescription": "Netflix Subscription",
+      "suggestedCategory": "Entertainment",
+      "confidenceScore": 0.9
+    }
+  ],
+  "minConfidenceScore": 0.5,
+  "applyEnhancements": true
+}
+
+### View Enhanced Transactions
+GET http://localhost:5295/api/transactions
+X-API-Key: test-key-user1
+

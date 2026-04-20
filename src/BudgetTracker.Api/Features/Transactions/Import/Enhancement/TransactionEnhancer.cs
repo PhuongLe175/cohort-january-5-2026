@@ -1,81 +1,156 @@
+using System.Diagnostics;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.AI;
 
 namespace BudgetTracker.Api.Features.Transactions.Import.Enhancement;
 
-public class TransactionEnhancer(IChatClient chatClient) : ITransactionEnhancer
+public class TransactionEnhancer : ITransactionEnhancer
 {
-    private const string SystemPrompt = """
-        You are a financial transaction categorizer. Given raw bank transaction descriptions,
-        return a JSON array where each element has:
-        - "original": the original description (unchanged)
-        - "clean": a human-readable description (e.g. "Amazon Purchase" instead of "AMZN MKTP US*123456789")
-        - "category": a spending category (e.g. Shopping, Groceries, Dining, Transport, Entertainment, Utilities, Healthcare, Transfer, Other)
+    private readonly IChatClient _chatClient;
+    private readonly ILogger<TransactionEnhancer> _logger;
 
-        Respond with ONLY the JSON array, no additional text.
-        """;
-
-    public async Task<IReadOnlyList<EnhancedTransactionDescription>> EnhanceDescriptionsAsync(
-        IReadOnlyList<string> rawDescriptions,
-        CancellationToken cancellationToken = default)
+    public TransactionEnhancer(
+        IChatClient chatClient,
+        ILogger<TransactionEnhancer> logger)
     {
-        if (rawDescriptions.Count == 0)
-            return [];
+        _chatClient = chatClient;
+        _logger = logger;
+    }
+
+    public async Task<List<EnhancedTransactionDescription>> EnhanceDescriptionsAsync(
+        List<string> descriptions,
+        string account,
+        string userId,
+        string? currentImportSessionHash = null)
+    {
+        if (!descriptions.Any())
+            return new List<EnhancedTransactionDescription>();
+
+        var stopwatch = Stopwatch.StartNew();
 
         try
         {
-            var userPrompt = $"Enhance these {rawDescriptions.Count} transaction descriptions:\n" +
-                             string.Join("\n", rawDescriptions.Select((d, i) => $"{i + 1}. {d}"));
+            var systemPrompt = CreateSystemPrompt();
+            var userPrompt = CreateUserPrompt(descriptions);
 
-            var messages = new List<ChatMessage>
-            {
-                new(ChatRole.System, SystemPrompt),
-                new(ChatRole.User, userPrompt)
-            };
+            var response = await _chatClient.GetResponseAsync([
+                new ChatMessage(ChatRole.System, systemPrompt),
+                new ChatMessage(ChatRole.User, userPrompt)
+            ]);
 
-            var response = await chatClient.GetResponseAsync(messages, cancellationToken: cancellationToken);
-            var content = response.Text?.Trim() ?? string.Empty;
+            var content = response.Text ?? string.Empty;
+            var results = ParseEnhancedDescriptions(content, descriptions);
 
-            return ParseResponse(content, rawDescriptions);
+            _logger.LogInformation("AI processing completed in {ProcessingTime}ms", stopwatch.ElapsedMilliseconds);
+
+            return results;
         }
-        catch
+        catch (Exception ex)
         {
-            return rawDescriptions
-                .Select(d => new EnhancedTransactionDescription(d, d, "Other"))
-                .ToList();
+            _logger.LogError(ex, "Failed to enhance transaction descriptions");
+            return CreateFallbackResponse(descriptions);
         }
     }
 
-    private static IReadOnlyList<EnhancedTransactionDescription> ParseResponse(
+    private static string CreateSystemPrompt()
+    {
+        return """
+            You are a transaction enhancement and categorization assistant. Your job is to clean up messy bank transaction descriptions and suggest appropriate spending categories.
+
+            Guidelines:
+            1. Transform cryptic merchant codes and bank jargon into clear, readable descriptions
+            2. Remove unnecessary reference numbers, codes, and technical identifiers
+            3. Identify the actual merchant or service provider
+            4. Suggest appropriate spending categories based on the merchant type and transaction purpose
+            5. Maintain accuracy - don't invent information not present in the original
+
+            Examples:
+            - "AMZN MKTP US*123456789" → "Amazon Marketplace Purchase" (Category: Shopping)
+            - "STARBUCKS COFFEE #1234" → "Starbucks Coffee" (Category: Food & Drink)
+            - "SHELL OIL #4567" → "Shell Gas Station" (Category: Gas & Fuel)
+            - "DD VODAFONE PORTU 222111000" → "Vodafone Portugal - Direct Debit" (Category: Utilities)
+            - "COMPRA 0000 TEMU.COM DUBLIN" → "Temu Online Purchase" (Category: Shopping)
+            - "TRF MB WAY P/ Manuel Silva" → "MB WAY Transfer to Manuel Silva" (Category: Transfer)
+
+            Common categories to use:
+            - Shopping, Groceries, Food & Drink, Entertainment, Gas & Fuel
+            - Utilities, Transportation, Healthcare, Transfer, Cash & ATM
+            - Technology, Subscriptions, Travel, Education, Other
+
+            Respond with a JSON array where each object has:
+            - "originalDescription": the input description
+            - "enhancedDescription": the cleaned description
+            - "suggestedCategory": appropriate category from the list above
+            - "confidenceScore": number between 0-1 indicating confidence in both enhancement and categorization
+
+            Be conservative with confidence scores - only use high scores (>0.8) when you're very certain about the merchant identification and category.
+            """;
+    }
+
+    private static string CreateUserPrompt(List<string> descriptions)
+    {
+        var descriptionsJson = JsonSerializer.Serialize(descriptions);
+        return $"Please enhance these transaction descriptions:\n{descriptionsJson}";
+    }
+
+    private List<EnhancedTransactionDescription> ParseEnhancedDescriptions(
         string content,
-        IReadOnlyList<string> originals)
+        List<string> originalDescriptions)
     {
         try
         {
-            if (content.StartsWith("```"))
+            var jsonContent = ExtractJsonFromCodeBlock(content);
+            var enhancedDescriptions = JsonSerializer.Deserialize<List<EnhancedTransactionDescription>>(
+                jsonContent,
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+            if (enhancedDescriptions?.Count == originalDescriptions.Count)
             {
-                var start = content.IndexOf('[');
-                var end = content.LastIndexOf(']');
-                if (start >= 0 && end > start)
-                    content = content[start..(end + 1)];
+                return enhancedDescriptions;
             }
-
-            var items = JsonSerializer.Deserialize<List<JsonElement>>(content);
-            if (items == null || items.Count != originals.Count)
-                return Fallback(originals);
-
-            return items.Select((item, i) => new EnhancedTransactionDescription(
-                originals[i],
-                item.TryGetProperty("clean", out var clean) ? clean.GetString() ?? originals[i] : originals[i],
-                item.TryGetProperty("category", out var cat) ? cat.GetString() ?? "Other" : "Other"
-            )).ToList();
         }
-        catch
+        catch (JsonException ex)
         {
-            return Fallback(originals);
+            _logger.LogWarning(ex, "Failed to parse AI response as JSON: {Content}", content);
         }
+        catch (FormatException ex)
+        {
+            _logger.LogWarning(ex, "Failed to extract JSON from AI response");
+        }
+
+        _logger.LogWarning("AI response format was invalid, returning original descriptions");
+        return CreateFallbackResponse(originalDescriptions);
     }
 
-    private static IReadOnlyList<EnhancedTransactionDescription> Fallback(IReadOnlyList<string> originals) =>
-        originals.Select(d => new EnhancedTransactionDescription(d, d, "Other")).ToList();
+    private static string ExtractJsonFromCodeBlock(string input)
+    {
+        // Look for content between ```json and ``` markers
+        var match = Regex.Match(input, @"```json\s*([\s\S]*?)\s*```");
+
+        if (match.Success)
+        {
+            return match.Groups[1].Value;
+        }
+
+        // Try to find a JSON array directly
+        var arrayMatch = Regex.Match(input, @"\[[\s\S]*\]");
+        if (arrayMatch.Success)
+        {
+            return arrayMatch.Value;
+        }
+
+        throw new FormatException("Could not extract JSON from the input string");
+    }
+
+    private static List<EnhancedTransactionDescription> CreateFallbackResponse(List<string> descriptions)
+    {
+        return descriptions.Select(d => new EnhancedTransactionDescription
+        {
+            OriginalDescription = d,
+            EnhancedDescription = d,
+            SuggestedCategory = null,
+            ConfidenceScore = 0.0
+        }).ToList();
+    }
 }

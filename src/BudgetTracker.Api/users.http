@@ -5,7 +5,7 @@ POST {{baseUrl}}/api/users/register
 Content-Type: application/json
 
 {
-  "email": "test@example.com",
+  "email": "phuongle@example.com",
   "password": "Test123!",
   "confirmPassword": "Test123!"
 }
@@ -16,7 +16,7 @@ POST {{baseUrl}}/api/users/login
 Content-Type: application/json
 
 {
-  "email": "test@example.com",
+  "email": "phuongle@example.com",
   "password": "Test123!",
   "useCookies": true
 }
@@ -28,40 +28,3 @@ Cookie: {{login.response.headers.Set-Cookie}}
 ### Logout
 POST {{baseUrl}}/api/users/logout
 Cookie: {{login.response.headers.Set-Cookie}}
-
-
-### Test AI-Enhanced Import with Sample File
-POST http://localhost:5295/api/transactions/import
-X-API-Key: test_key_user_1
-Content-Type: multipart/form-data; boundary=WebAppBoundary
-
---WebAppBoundary
-Content-Disposition: form-data; name="account"
-
-Checking Account
---WebAppBoundary
-Content-Disposition: form-data; name="file"; filename="sample.csv"
-Content-Type: text/csv
-
-Date,Description,Amount,Balance
-01/15/2025,AMZN,-45.67,1250.33
-01/16/2025,STARBUCKS COFFEE #1234,-5.89,1244.44
-01/17/2025,DD VODAFONE PORTU 222111000,-52.30,1192.14
-01/18/2025,NFLX Subscription,-15.99,1176.15
---WebAppBoundary--
-
-### Apply Enhancements (use importSessionHash from import response)
-POST http://localhost:5295/api/transactions/import/enhance
-X-API-Key: test_key_user_1
-Content-Type: application/json
-
-{
-  "importSessionHash": "65fa24e76370",
-  "enhancements": [],
-  "minConfidenceScore": 0.5,
-  "applyEnhancements": true
-}
-
-### View Enhanced Transactions
-GET http://localhost:5295/api/transactions
-X-API-Key: test_key_user_1

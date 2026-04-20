@@ -27,47 +27,67 @@ public static class ImportApi
     }
 
     private static async Task<Results<Ok<ImportResult>, BadRequest<string>>> ImportAsync(
-        IFormFile file, [FromForm] string account,
-        CsvImporter csvImporter, ITransactionEnhancer enhancer,
-        BudgetTrackerContext context, ClaimsPrincipal claimsPrincipal)
+        IFormFile file,
+        [FromForm] string account,
+        CsvImporter csvImporter,
+        ITransactionEnhancer enhancer,
+        BudgetTrackerContext context,
+        ClaimsPrincipal claimsPrincipal)
     {
         var validationResult = ValidateFileInput(file, account);
         if (validationResult != null)
+        {
             return validationResult;
+        }
 
         try
         {
             var userId = claimsPrincipal.GetUserId();
+            var sessionHash = GenerateSessionHash(file.FileName, DateTime.UtcNow);
 
-            using var stream = file.OpenReadStream();
+            await using var stream = file.OpenReadStream();
             var (result, transactions) = await csvImporter.ParseCsvAsync(stream, file.FileName, userId, account);
-
-            var sessionHash = GenerateSessionHash(userId, file.FileName);
-            result.ImportSessionHash = sessionHash;
 
             if (transactions.Any())
             {
-                var rawDescriptions = transactions.Select(t => t.Description).ToList();
-                var enhancements = await enhancer.EnhanceDescriptionsAsync(rawDescriptions);
+                // Extract descriptions for AI enhancement
+                var descriptions = transactions.Select(t => t.Description).ToList();
 
+                // Enhance descriptions with AI (includes categories)
+                var enhancements = await enhancer.EnhanceDescriptionsAsync(
+                    descriptions, account, userId, sessionHash);
+
+                // Create enhancement results for preview
                 var enhancementResults = new List<TransactionEnhancementResult>();
+
                 for (var i = 0; i < transactions.Count; i++)
                 {
-                    transactions[i].ImportSessionHash = sessionHash;
-                    var enhancement = enhancements[i];
+                    var transaction = transactions[i];
+                    var enhancement = enhancements.FirstOrDefault(e =>
+                        e.OriginalDescription == transaction.Description) ?? enhancements[i];
+
+                    // Set session hash for tracking
+                    transaction.ImportSessionHash = sessionHash;
+
                     enhancementResults.Add(new TransactionEnhancementResult
                     {
-                        TransactionId = transactions[i].Id,
+                        TransactionId = transaction.Id,
+                        ImportSessionHash = sessionHash,
+                        TransactionIndex = i,
                         OriginalDescription = enhancement.OriginalDescription,
-                        CleanDescription = enhancement.CleanDescription,
-                        SuggestedCategory = enhancement.SuggestedCategory
+                        EnhancedDescription = enhancement.EnhancedDescription,
+                        SuggestedCategory = enhancement.SuggestedCategory,
+                        ConfidenceScore = enhancement.ConfidenceScore
                     });
                 }
 
-                result.Enhancements = enhancementResults;
-
+                // Save transactions with original descriptions
+                // (enhancements applied later via enhanced endpoint)
                 await context.Transactions.AddRangeAsync(transactions);
                 await context.SaveChangesAsync();
+
+                result.ImportSessionHash = sessionHash;
+                result.Enhancements = enhancementResults;
             }
 
             return TypedResults.Ok(result);
@@ -78,47 +98,71 @@ public static class ImportApi
         }
     }
 
-    private static async Task<Results<Ok<EnhanceImportResult>, BadRequest<string>, NotFound>> EnhanceImportAsync(
-        EnhanceImportRequest request, ITransactionEnhancer enhancer,
-        BudgetTrackerContext context, ClaimsPrincipal claimsPrincipal)
+      private static async Task<Results<Ok<EnhanceImportResult>, BadRequest<string>>> EnhanceImportAsync(
+        [FromBody] EnhanceImportRequest request,
+        BudgetTrackerContext context,
+        ClaimsPrincipal claimsPrincipal)
     {
-        if (string.IsNullOrWhiteSpace(request.ImportSessionHash))
-            return TypedResults.BadRequest("ImportSessionHash is required");
-
-        var userId = claimsPrincipal.GetUserId();
-
-        var transactions = await context.Transactions
-            .Where(t => t.UserId == userId && t.ImportSessionHash == request.ImportSessionHash)
-            .ToListAsync();
-
-        if (transactions.Count == 0)
-            return TypedResults.NotFound();
-
-        var rawDescriptions = transactions.Select(t => t.Description).ToList();
-        var enhancements = await enhancer.EnhanceDescriptionsAsync(rawDescriptions);
-
-        for (var i = 0; i < transactions.Count; i++)
+        try
         {
-            transactions[i].Description = enhancements[i].CleanDescription;
-            transactions[i].Category = enhancements[i].SuggestedCategory;
+            var userId = claimsPrincipal.GetUserId();
+            if (string.IsNullOrEmpty(userId))
+                return TypedResults.BadRequest("User not authenticated");
+
+            var enhancedCount = 0;
+
+            if (request.ApplyEnhancements)
+            {
+                var transactions = await context.Transactions
+                    .Where(t => t.UserId == userId && t.ImportSessionHash == request.ImportSessionHash)
+                    .ToListAsync();
+
+                foreach (var enhancement in request.Enhancements)
+                {
+                    if (enhancement.ConfidenceScore < request.MinConfidenceScore)
+                        continue;
+
+                    var transaction = transactions.FirstOrDefault(t => t.Id == enhancement.TransactionId);
+                    if (transaction == null)
+                        continue;
+
+                    transaction.Description = enhancement.EnhancedDescription;
+
+                    if (!string.IsNullOrEmpty(enhancement.SuggestedCategory))
+                    {
+                        transaction.Category = enhancement.SuggestedCategory;
+                    }
+
+                    enhancedCount++;
+                }
+
+                if (enhancedCount > 0)
+                {
+                    await context.SaveChangesAsync();
+                }
+            }
+
+            return TypedResults.Ok(new EnhanceImportResult
+            {
+                ImportSessionHash = request.ImportSessionHash,
+                TotalTransactions = request.Enhancements.Count,
+                EnhancedCount = enhancedCount,
+                SkippedCount = request.Enhancements.Count - enhancedCount
+            });
         }
-
-        await context.SaveChangesAsync();
-
-        return TypedResults.Ok(new EnhanceImportResult
+        catch (Exception ex)
         {
-            UpdatedCount = transactions.Count,
-            ImportSessionHash = request.ImportSessionHash
-        });
+            return TypedResults.BadRequest($"Enhancement failed: {ex.Message}");
+        }
     }
 
-    private static string GenerateSessionHash(string userId, string fileName)
+    private static string GenerateSessionHash(string fileName, DateTime timestamp)
     {
-        var input = $"{userId}:{fileName}:{DateTime.UtcNow:O}";
+        var input = $"{fileName}_{timestamp:yyyyMMddHHmmss}_{Guid.NewGuid()}";
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes(input));
-        return Convert.ToHexString(hash)[..12].ToLowerInvariant();
+        return Convert.ToHexString(hash)[..12];
     }
-
+    
     private static BadRequest<string>? ValidateFileInput(IFormFile file, string account)
     {
         if (file == null || file.Length == 0)
