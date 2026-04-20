@@ -1,5 +1,5 @@
 import { apiClient } from '../../api';
-import type { TransactionListDto, GetTransactionsParams, ImportResult, ImportTransactionsParams } from './types';
+import type { TransactionListDto, GetTransactionsParams, ImportResult, ImportTransactionsParams, EnhanceImportRequest, EnhanceImportResult } from './types';
 
 export const transactionsApi = {
   async getTransactions(params: GetTransactionsParams = {}): Promise<TransactionListDto> {
@@ -28,5 +28,13 @@ export const transactionsApi = {
       }
       throw error;
     }
+  },
+
+  async enhanceImport(request: EnhanceImportRequest): Promise<EnhanceImportResult> {
+    const response = await apiClient.post<EnhanceImportResult>(
+      '/transactions/import/enhance',
+      request
+    );
+    return response.data;
   }
 };

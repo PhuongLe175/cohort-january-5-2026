@@ -25,14 +25,39 @@ export interface GetTransactionsParams {
   pageSize?: number;
 }
 
+export interface TransactionEnhancement {
+  transactionId: string;
+  importSessionHash: string;
+  transactionIndex: number;
+  originalDescription: string;
+  enhancedDescription: string;
+  suggestedCategory?: string;
+  confidenceScore: number;
+}
+
 export interface ImportResult {
   totalRows: number;
   importedCount: number;
   failedCount: number;
   errors: string[];
-  sourceFile: string | null;
-  importSessionHash: string | null;
+  sourceFile?: string;
   importedAt: string;
+  importSessionHash: string;
+  enhancements: TransactionEnhancement[];
+}
+
+export interface EnhanceImportRequest {
+  importSessionHash: string;
+  enhancements: TransactionEnhancement[];
+  minConfidenceScore: number;
+  applyEnhancements: boolean;
+}
+
+export interface EnhanceImportResult {
+  importSessionHash: string;
+  totalTransactions: number;
+  enhancedCount: number;
+  skippedCount: number;
 }
 
 export interface ImportTransactionsParams {
