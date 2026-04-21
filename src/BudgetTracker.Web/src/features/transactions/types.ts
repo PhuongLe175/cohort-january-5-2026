@@ -44,6 +44,8 @@ export interface ImportResult {
   importedAt: string;
   importSessionHash: string;
   enhancements: TransactionEnhancement[];
+  detectionMethod?: string;     // "RuleBased" | "AI"
+  detectionConfidence?: number; // 0-100
 }
 
 export interface EnhanceImportRequest {

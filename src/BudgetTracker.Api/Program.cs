@@ -1,6 +1,7 @@
 using BudgetTracker.Api.AntiForgery;
 using BudgetTracker.Api.Auth;
 using BudgetTracker.Api.Features.Transactions;
+using BudgetTracker.Api.Features.Transactions.Import.Detection;
 using BudgetTracker.Api.Features.Transactions.Import.Enhancement;
 using BudgetTracker.Api.Features.Transactions.Import.Processing;
 using Microsoft.EntityFrameworkCore;
@@ -47,6 +48,9 @@ builder.Services.AddDbContext<BudgetTrackerContext>(options =>
 // Add CSV Import Service
 builder.Services.AddScoped<CsvImporter>();
 builder.Services.AddScoped<ITransactionEnhancer, TransactionEnhancer>();
+builder.Services.AddScoped<ICsvStructureDetector, CsvStructureDetector>();
+builder.Services.AddScoped<ICsvDetector, CsvDetector>();
+builder.Services.AddScoped<ICsvAnalyzer, CsvAnalyzer>();
 
 // Add Auth with multiple schemes
 builder.Services.AddAuthorization(options =>

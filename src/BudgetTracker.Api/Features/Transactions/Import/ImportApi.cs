@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using BudgetTracker.Api.Auth;
 using BudgetTracker.Api.Infrastructure;
+using BudgetTracker.Api.Features.Transactions.Import.Detection;
 using BudgetTracker.Api.Features.Transactions.Import.Enhancement;
 using BudgetTracker.Api.Features.Transactions.Import.Processing;
 using BudgetTracker.Api.AntiForgery;
@@ -29,6 +30,7 @@ public static class ImportApi
     private static async Task<Results<Ok<ImportResult>, BadRequest<string>>> ImportAsync(
         IFormFile file,
         [FromForm] string account,
+        ICsvStructureDetector detectionService,
         CsvImporter csvImporter,
         ITransactionEnhancer enhancer,
         BudgetTrackerContext context,
@@ -36,9 +38,7 @@ public static class ImportApi
     {
         var validationResult = ValidateFileInput(file, account);
         if (validationResult != null)
-        {
             return validationResult;
-        }
 
         try
         {
@@ -46,18 +46,27 @@ public static class ImportApi
             var sessionHash = GenerateSessionHash(file.FileName, DateTime.UtcNow);
 
             await using var stream = file.OpenReadStream();
-            var (result, transactions) = await csvImporter.ParseCsvAsync(stream, file.FileName, userId, account);
+
+            var detectionResult = await detectionService.DetectStructureAsync(stream);
+
+            if (detectionResult.ConfidenceScore < 85)
+            {
+                return TypedResults.BadRequest(
+                    $"Could not reliably detect CSV structure (confidence: {detectionResult.ConfidenceScore:F0}%). " +
+                    (detectionResult.ErrorMessage ?? "Please ensure the file contains Date, Description, and Amount columns."));
+            }
+
+            stream.Position = 0;
+            var (result, transactions) = await csvImporter.ParseCsvAsync(stream, file.FileName, userId, account, detectionResult);
+
+            result.DetectionMethod = detectionResult.Method.ToString();
+            result.DetectionConfidence = detectionResult.ConfidenceScore;
 
             if (transactions.Any())
             {
-                // Extract descriptions for AI enhancement
                 var descriptions = transactions.Select(t => t.Description).ToList();
+                var enhancements = await enhancer.EnhanceDescriptionsAsync(descriptions, account, userId, sessionHash);
 
-                // Enhance descriptions with AI (includes categories)
-                var enhancements = await enhancer.EnhanceDescriptionsAsync(
-                    descriptions, account, userId, sessionHash);
-
-                // Create enhancement results for preview
                 var enhancementResults = new List<TransactionEnhancementResult>();
 
                 for (var i = 0; i < transactions.Count; i++)
@@ -66,7 +75,6 @@ public static class ImportApi
                     var enhancement = enhancements.FirstOrDefault(e =>
                         e.OriginalDescription == transaction.Description) ?? enhancements[i];
 
-                    // Set session hash for tracking
                     transaction.ImportSessionHash = sessionHash;
 
                     enhancementResults.Add(new TransactionEnhancementResult
@@ -81,8 +89,6 @@ public static class ImportApi
                     });
                 }
 
-                // Save transactions with original descriptions
-                // (enhancements applied later via enhanced endpoint)
                 await context.Transactions.AddRangeAsync(transactions);
                 await context.SaveChangesAsync();
 
@@ -98,7 +104,7 @@ public static class ImportApi
         }
     }
 
-      private static async Task<Results<Ok<EnhanceImportResult>, BadRequest<string>>> EnhanceImportAsync(
+    private static async Task<Results<Ok<EnhanceImportResult>, BadRequest<string>>> EnhanceImportAsync(
         [FromBody] EnhanceImportRequest request,
         BudgetTrackerContext context,
         ClaimsPrincipal claimsPrincipal)
@@ -129,17 +135,13 @@ public static class ImportApi
                     transaction.Description = enhancement.EnhancedDescription;
 
                     if (!string.IsNullOrEmpty(enhancement.SuggestedCategory))
-                    {
                         transaction.Category = enhancement.SuggestedCategory;
-                    }
 
                     enhancedCount++;
                 }
 
                 if (enhancedCount > 0)
-                {
                     await context.SaveChangesAsync();
-                }
             }
 
             return TypedResults.Ok(new EnhanceImportResult
@@ -162,7 +164,7 @@ public static class ImportApi
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes(input));
         return Convert.ToHexString(hash)[..12];
     }
-    
+
     private static BadRequest<string>? ValidateFileInput(IFormFile file, string account)
     {
         if (file == null || file.Length == 0)

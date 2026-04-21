@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using BudgetTracker.Api.Features.Transactions.Import.Detection;
 using CsvHelper;
 using CsvHelper.Configuration;
 
@@ -7,8 +8,13 @@ namespace BudgetTracker.Api.Features.Transactions.Import.Processing;
 
 public class CsvImporter
 {
-    public async Task<(ImportResult Result, List<Transaction> Transactions)> ParseCsvAsync(
+    public Task<(ImportResult Result, List<Transaction> Transactions)> ParseCsvAsync(
         Stream csvStream, string sourceFileName, string userId, string account)
+        => ParseCsvAsync(csvStream, sourceFileName, userId, account, null);
+
+    public async Task<(ImportResult Result, List<Transaction> Transactions)> ParseCsvAsync(
+        Stream csvStream, string sourceFileName, string userId, string account,
+        CsvStructureDetectionResult? detectionResult)
     {
         var result = new ImportResult
         {
@@ -17,6 +23,8 @@ public class CsvImporter
         };
 
         var transactions = new List<Transaction>();
+        var delimiter = detectionResult?.Delimiter ?? ",";
+        var culture = ParseCulture(detectionResult?.CultureCode);
 
         try
         {
@@ -25,7 +33,8 @@ public class CsvImporter
             {
                 HasHeaderRecord = true,
                 MissingFieldFound = null,
-                BadDataFound = null
+                BadDataFound = null,
+                Delimiter = delimiter
             });
 
             var rowNumber = 0;
@@ -37,7 +46,7 @@ public class CsvImporter
 
                 try
                 {
-                    var transaction = ParseTransactionRow(record);
+                    var transaction = ParseTransactionRow(record, detectionResult?.ColumnMappings, culture);
                     if (transaction != null)
                     {
                         transaction.UserId = userId;
@@ -71,56 +80,44 @@ public class CsvImporter
         }
     }
 
-    private Transaction? ParseTransactionRow(dynamic record)
+    private Transaction? ParseTransactionRow(
+        dynamic record,
+        Dictionary<string, string>? columnMappings,
+        CultureInfo culture)
     {
         try
         {
             var recordDict = (IDictionary<string, object>)record;
 
-            // Flexible column mapping - try common variations
-            var description = GetColumnValue(recordDict, "Description", "Memo", "Details");
-            var dateStr = GetColumnValue(recordDict, "Date", "Transaction Date", "Posting Date");
-            var amountStr = GetColumnValue(recordDict, "Amount", "Transaction Amount", "Debit", "Credit");
-            var balanceStr = GetColumnValue(recordDict, "Balance", "Running Balance", "Account Balance");
-            var category = GetColumnValue(recordDict, "Category", "Type", "Transaction Type");
+            var description = ResolveColumn(recordDict, columnMappings, "Description",
+                ColumnMappingDictionary.DescriptionColumns);
+            var dateStr = ResolveColumn(recordDict, columnMappings, "Date",
+                ColumnMappingDictionary.DateColumns);
+            var amountStr = ResolveColumn(recordDict, columnMappings, "Amount",
+                ColumnMappingDictionary.AmountColumns);
+            var balanceStr = ResolveColumn(recordDict, columnMappings, "Balance",
+                ColumnMappingDictionary.BalanceColumns);
+            var category = ResolveColumn(recordDict, columnMappings, "Category",
+                ColumnMappingDictionary.CategoryColumns);
 
-            // Validate required fields
             if (string.IsNullOrWhiteSpace(description))
-            {
                 throw new ArgumentException("Description is required");
-            }
 
             if (string.IsNullOrWhiteSpace(dateStr))
-            {
                 throw new ArgumentException("Date is required");
-            }
 
             if (string.IsNullOrWhiteSpace(amountStr))
-            {
                 throw new ArgumentException("Amount is required");
-            }
 
-            // Parse date with culture-aware parsing
-            if (!TryParseDate(dateStr, out var date))
-            {
+            if (!TryParseDate(dateStr, culture, out var date))
                 throw new ArgumentException($"Invalid date format: {dateStr}");
-            }
 
-            // Parse amount using culture-aware parsing
-            if (!TryParseAmount(amountStr, out var amount))
-            {
+            if (!TryParseAmount(amountStr, culture, out var amount))
                 throw new ArgumentException($"Invalid amount format: {amountStr}");
-            }
 
-            // Parse balance (optional)
             decimal? balance = null;
-            if (!string.IsNullOrWhiteSpace(balanceStr))
-            {
-                if (TryParseAmount(balanceStr, out var parsedBalance))
-                {
-                    balance = parsedBalance;
-                }
-            }
+            if (!string.IsNullOrWhiteSpace(balanceStr) && TryParseAmount(balanceStr, culture, out var parsedBalance))
+                balance = parsedBalance;
 
             return new Transaction
             {
@@ -139,46 +136,79 @@ public class CsvImporter
         }
     }
 
+    private static string? ResolveColumn(
+        IDictionary<string, object> record,
+        Dictionary<string, string>? columnMappings,
+        string logicalName,
+        string[] defaultNames)
+    {
+        // Try the mapped column name first
+        if (columnMappings != null && columnMappings.TryGetValue(logicalName, out var mappedName))
+        {
+            var value = GetColumnValue(record, mappedName);
+            if (value != null) return value;
+        }
+
+        // Fall back to default column names
+        return GetColumnValue(record, defaultNames);
+    }
+
     private static string? GetColumnValue(IDictionary<string, object> record, params string[] columnNames)
     {
         foreach (var columnName in columnNames)
         {
             if (record.TryGetValue(columnName, out var value) && value != null)
-            {
                 return value.ToString()?.Trim();
-            }
         }
-
         return null;
     }
 
-    private bool TryParseDate(string dateStr, out DateTime date)
+    private static bool TryParseDate(string dateStr, CultureInfo culture, out DateTime date)
     {
         date = default;
 
-        // Try culture-aware parsing first
+        if (DateTime.TryParse(dateStr.Trim(), culture,
+            DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out date))
+            return true;
+
         if (DateTime.TryParse(dateStr.Trim(), CultureInfo.InvariantCulture,
             DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out date))
-        {
             return true;
-        }
 
         return false;
     }
 
-    private static bool TryParseAmount(string amountStr, out decimal amount)
+    private static bool TryParseAmount(string amountStr, CultureInfo culture, out decimal amount)
     {
         amount = 0;
 
         if (string.IsNullOrWhiteSpace(amountStr))
             return false;
 
-        var cleanAmount = amountStr.Trim();
+        var cleanAmount = amountStr.Trim()
+            .Replace("$", "").Replace("€", "").Replace("£", "").Replace("¥", "").Replace("R$", "").Trim();
 
-        // Remove common currency symbols
-        cleanAmount = cleanAmount.Replace("$", "").Replace("€", "").Replace("£", "").Replace("¥", "").Replace("R$", "").Trim();
+        if (decimal.TryParse(cleanAmount, NumberStyles.Currency, culture, out amount))
+            return true;
 
-        // Use culture-specific parsing - .NET handles decimal/thousand separators automatically
-        return decimal.TryParse(cleanAmount, NumberStyles.Currency, CultureInfo.InvariantCulture, out amount);
+        if (decimal.TryParse(cleanAmount, NumberStyles.Currency, CultureInfo.InvariantCulture, out amount))
+            return true;
+
+        return false;
+    }
+
+    private static CultureInfo ParseCulture(string? cultureCode)
+    {
+        if (string.IsNullOrWhiteSpace(cultureCode))
+            return CultureInfo.InvariantCulture;
+
+        try
+        {
+            return CultureInfo.GetCultureInfo(cultureCode);
+        }
+        catch
+        {
+            return CultureInfo.InvariantCulture;
+        }
     }
 }

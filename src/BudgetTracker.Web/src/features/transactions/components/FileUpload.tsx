@@ -5,6 +5,9 @@ import { apiClient } from '../../../api';
 import { transactionsApi } from '../api';
 import type { EnhanceImportResult, ImportResult } from '../types';
 import { LoadingSpinner } from '../../../shared/components/LoadingSpinner';
+import DetectionProgressIndicator from './DetectionProgressIndicator';
+import type { Phase } from './DetectionProgressIndicator';
+import DetectionMethodBadge from './DetectionMethodBadge';
 
 interface FileUploadProps {
   className?: string;
@@ -22,7 +25,7 @@ function FileUpload({ className = '' }: FileUploadProps) {
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const [minConfidenceScore, setMinConfidenceScore] = useState(0.7);
   const [enhanceResult, setEnhanceResult] = useState<EnhanceImportResult | null>(null);
-  const [currentPhase, setCurrentPhase] = useState<'uploading' | 'parsing' | 'enhancing' | 'complete'>('uploading');
+  const [currentPhase, setCurrentPhase] = useState<Phase>('uploading');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
   const { showSuccess, showError } = useToast();
@@ -107,9 +110,11 @@ function FileUpload({ className = '' }: FileUploadProps) {
             : 0;
           setUploadProgress(progress);
 
-          if (progress < 30) {
+          if (progress < 25) {
             setCurrentPhase('uploading');
-          } else if (progress < 70) {
+          } else if (progress < 50) {
+            setCurrentPhase('detecting');
+          } else if (progress < 75) {
             setCurrentPhase('parsing');
           } else if (progress < 100) {
             setCurrentPhase('enhancing');
@@ -124,11 +129,7 @@ function FileUpload({ className = '' }: FileUploadProps) {
       showSuccess(`Imported ${result.importedCount} transactions - review AI enhancements below`);
     } catch (error) {
       console.error('Import error:', error);
-      let errorMessage = 'Failed to import the CSV file';
-      if (error && typeof error === 'object' && 'message' in error) {
-        errorMessage = (error as Error).message;
-      }
-      showError('Import Failed', errorMessage);
+      showError('Import Failed', getErrorMessage(error));
     } finally {
       setIsUploading(false);
       setUploadProgress(0);
@@ -168,6 +169,15 @@ function FileUpload({ className = '' }: FileUploadProps) {
       setIsUploading(false);
     }
   }, [importResult, minConfidenceScore, showSuccess, showError, navigate]);
+
+  const getErrorMessage = (error: unknown): string => {
+    if (error && typeof error === 'object' && 'message' in error) {
+      const message = (error as Error).message;
+      if (message.includes('detect CSV structure')) return message;
+      if (message.includes('confidence')) return message;
+    }
+    return 'Failed to import the CSV file. Please check the file format.';
+  };
 
   const handleClearFile = useCallback(() => {
     setSelectedFile(null);
@@ -319,6 +329,7 @@ function FileUpload({ className = '' }: FileUploadProps) {
                       <LoadingSpinner size="sm" />
                       <span className="ml-2">
                         {currentPhase === 'uploading' ? 'Uploading...' :
+                         currentPhase === 'detecting' ? 'Detecting...' :
                          currentPhase === 'parsing' ? 'Parsing...' :
                          currentPhase === 'enhancing' ? 'Enhancing...' : 'Processing...'}
                       </span>
@@ -332,22 +343,7 @@ function FileUpload({ className = '' }: FileUploadProps) {
           )}
 
           {isUploading && uploadProgress > 0 && (
-            <div className="space-y-2">
-              <div className="flex justify-between text-sm">
-                <span className="text-gray-600">
-                  {currentPhase === 'uploading' ? 'Uploading file...' :
-                   currentPhase === 'parsing' ? 'Parsing transactions...' :
-                   currentPhase === 'enhancing' ? 'Enhancing with AI...' : 'Finalizing...'}
-                </span>
-                <span className="text-blue-600 font-medium">{uploadProgress}%</span>
-              </div>
-              <div className="w-full bg-gray-200 rounded-full h-2">
-                <div
-                  className="h-2 rounded-full bg-blue-600 transition-all"
-                  style={{ width: `${uploadProgress}%` }}
-                />
-              </div>
-            </div>
+            <DetectionProgressIndicator currentPhase={currentPhase} progress={uploadProgress} />
           )}
         </>
       )}
@@ -357,7 +353,13 @@ function FileUpload({ className = '' }: FileUploadProps) {
         <div className="space-y-6">
           <div className="bg-white rounded-xl border border-gray-200 p-6">
             <div className="flex items-center justify-between mb-6">
-              <h3 className="text-lg font-semibold text-gray-900">Review AI Enhancements</h3>
+              <div className="space-y-1">
+                <h3 className="text-lg font-semibold text-gray-900">Review AI Enhancements</h3>
+                <DetectionMethodBadge
+                  method={importResult.detectionMethod}
+                  confidence={importResult.detectionConfidence}
+                />
+              </div>
               <div className="flex items-center space-x-4 text-sm">
                 <span className="text-green-600">
                   {importResult.importedCount} imported
@@ -501,6 +503,14 @@ function FileUpload({ className = '' }: FileUploadProps) {
                   : 'Your transactions have been imported successfully.'}
               </p>
             </div>
+
+            {importResult?.detectionMethod && (
+              <div className="text-sm text-gray-500 bg-gray-50 rounded-lg px-4 py-2">
+                {importResult.detectionMethod === 'AI'
+                  ? `Format detected using AI analysis (${Math.round(importResult.detectionConfidence ?? 0)}% confidence)`
+                  : `Format detected automatically using pattern matching (${Math.round(importResult.detectionConfidence ?? 0)}% confidence)`}
+              </div>
+            )}
 
             <button
               onClick={() => navigate('/transactions')}

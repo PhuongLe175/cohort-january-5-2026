@@ -12,6 +12,10 @@ public class ImportResult
     // Enhancement support for multi-step workflow
     public string ImportSessionHash { get; set; } = string.Empty;
     public List<TransactionEnhancementResult> Enhancements { get; set; } = new();
+
+    // Detection metadata
+    public string? DetectionMethod { get; set; }
+    public double DetectionConfidence { get; set; }
 }
 
 public class TransactionEnhancementResult
