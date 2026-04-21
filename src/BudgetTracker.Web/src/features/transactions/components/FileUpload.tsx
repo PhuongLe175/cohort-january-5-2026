@@ -5,9 +5,8 @@ import { apiClient } from '../../../api';
 import { transactionsApi } from '../api';
 import type { EnhanceImportResult, ImportResult } from '../types';
 import { LoadingSpinner } from '../../../shared/components/LoadingSpinner';
-import DetectionProgressIndicator from './DetectionProgressIndicator';
-import type { Phase } from './DetectionProgressIndicator';
-import DetectionMethodBadge from './DetectionMethodBadge';
+import { DetectionProgressIndicator } from './DetectionProgressIndicator';
+import { DetectionMethodBadge } from './DetectionMethodBadge';
 
 interface FileUploadProps {
   className?: string;
@@ -25,7 +24,7 @@ function FileUpload({ className = '' }: FileUploadProps) {
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const [minConfidenceScore, setMinConfidenceScore] = useState(0.7);
   const [enhanceResult, setEnhanceResult] = useState<EnhanceImportResult | null>(null);
-  const [currentPhase, setCurrentPhase] = useState<Phase>('uploading');
+  const [currentPhase, setCurrentPhase] = useState<'uploading' | 'detecting' | 'parsing' | 'enhancing' | 'complete'>('uploading');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
   const { showSuccess, showError } = useToast();
@@ -110,11 +109,11 @@ function FileUpload({ className = '' }: FileUploadProps) {
             : 0;
           setUploadProgress(progress);
 
-          if (progress < 25) {
+          if (progress < 20) {
             setCurrentPhase('uploading');
-          } else if (progress < 50) {
+          } else if (progress < 40) {
             setCurrentPhase('detecting');
-          } else if (progress < 75) {
+          } else if (progress < 70) {
             setCurrentPhase('parsing');
           } else if (progress < 100) {
             setCurrentPhase('enhancing');
@@ -171,12 +170,17 @@ function FileUpload({ className = '' }: FileUploadProps) {
   }, [importResult, minConfidenceScore, showSuccess, showError, navigate]);
 
   const getErrorMessage = (error: unknown): string => {
-    if (error && typeof error === 'object' && 'message' in error) {
-      const message = (error as Error).message;
-      if (message.includes('detect CSV structure')) return message;
-      if (message.includes('confidence')) return message;
+    const message = (error as Error)?.message || 'Failed to import the file';
+
+    if (message.includes('Unable to automatically detect CSV structure')) {
+      return 'Could not detect the CSV format. Please ensure your file has clear column headers (Date, Description, Amount).';
     }
-    return 'Failed to import the CSV file. Please check the file format.';
+
+    if (message.includes('AI analysis')) {
+      return 'AI analysis could not determine the file structure. Try a CSV with standard column names.';
+    }
+
+    return message;
   };
 
   const handleClearFile = useCallback(() => {
@@ -343,7 +347,11 @@ function FileUpload({ className = '' }: FileUploadProps) {
           )}
 
           {isUploading && uploadProgress > 0 && (
-            <DetectionProgressIndicator currentPhase={currentPhase} progress={uploadProgress} />
+            <DetectionProgressIndicator
+              currentPhase={currentPhase}
+              progress={uploadProgress}
+              fileName={selectedFile?.name ?? ''}
+            />
           )}
         </>
       )}
@@ -352,22 +360,26 @@ function FileUpload({ className = '' }: FileUploadProps) {
       {currentStep === 'preview' && importResult && (
         <div className="space-y-6">
           <div className="bg-white rounded-xl border border-gray-200 p-6">
-            <div className="flex items-center justify-between mb-6">
-              <div className="space-y-1">
+            <div className="mb-6 space-y-4">
+              <div className="flex items-center justify-between">
                 <h3 className="text-lg font-semibold text-gray-900">Review AI Enhancements</h3>
-                <DetectionMethodBadge
-                  method={importResult.detectionMethod}
-                  confidence={importResult.detectionConfidence}
-                />
+                <div className="flex items-center space-x-4 text-sm">
+                  <span className="text-green-600">{importResult.importedCount} imported</span>
+                  <span className="text-blue-600">
+                    {importResult.enhancements.filter(e => e.confidenceScore >= minConfidenceScore).length} will be enhanced
+                  </span>
+                </div>
               </div>
-              <div className="flex items-center space-x-4 text-sm">
-                <span className="text-green-600">
-                  {importResult.importedCount} imported
-                </span>
-                <span className="text-blue-600">
-                  {importResult.enhancements.filter(e => e.confidenceScore >= minConfidenceScore).length} will be enhanced
-                </span>
-              </div>
+
+              {importResult.detectionMethod && (
+                <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                  <span className="text-sm text-gray-600">Structure Detection</span>
+                  <DetectionMethodBadge
+                    method={importResult.detectionMethod}
+                    confidence={importResult.detectionConfidence}
+                  />
+                </div>
+              )}
             </div>
 
             <div className="space-y-3 max-h-96 overflow-y-auto">
@@ -505,10 +517,22 @@ function FileUpload({ className = '' }: FileUploadProps) {
             </div>
 
             {importResult?.detectionMethod && (
-              <div className="text-sm text-gray-500 bg-gray-50 rounded-lg px-4 py-2">
-                {importResult.detectionMethod === 'AI'
-                  ? `Format detected using AI analysis (${Math.round(importResult.detectionConfidence ?? 0)}% confidence)`
-                  : `Format detected automatically using pattern matching (${Math.round(importResult.detectionConfidence ?? 0)}% confidence)`}
+              <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-medium text-green-800">
+                    CSV Analysis: {importResult.detectionMethod === 'RuleBased' ? 'Pattern Matching' : 'AI Detection'}
+                  </span>
+                  {importResult.detectionConfidence !== undefined && (
+                    <span className="text-xs text-green-700 bg-green-200 px-2 py-1 rounded">
+                      {Math.round(importResult.detectionConfidence)}% confidence
+                    </span>
+                  )}
+                </div>
+                <div className="text-xs text-green-600 mt-1">
+                  {importResult.detectionMethod === 'RuleBased'
+                    ? 'Standard format detected using pattern matching'
+                    : 'Complex format analyzed using AI detection'}
+                </div>
               </div>
             )}
 
