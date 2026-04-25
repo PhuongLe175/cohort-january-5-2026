@@ -4,18 +4,16 @@ namespace BudgetTracker.Api.Infrastructure.Extensions;
 
 public static class StringExtensions
 {
-    public static string ExtractJsonFromCodeBlock(this string text)
+    public static string ExtractJsonFromCodeBlock(this string input)
     {
-        if (string.IsNullOrWhiteSpace(text)) return text;
+        if (!input.Contains("```json"))
+            return input;
 
-        var match = Regex.Match(text, @"```(?:json)?\s*([\s\S]*?)\s*```");
+        var match = Regex.Match(input, @"```json\s*([\s\S]*?)\s*```");
+
         if (match.Success)
-            return match.Groups[1].Value.Trim();
+            return match.Groups[1].Value;
 
-        var objectMatch = Regex.Match(text, @"\{[\s\S]*\}");
-        if (objectMatch.Success)
-            return objectMatch.Value;
-
-        return text.Trim();
+        throw new FormatException("Could not extract JSON from the input string");
     }
 }

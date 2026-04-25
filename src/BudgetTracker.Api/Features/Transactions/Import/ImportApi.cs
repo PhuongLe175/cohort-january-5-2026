@@ -30,15 +30,19 @@ public static class ImportApi
     private static async Task<Results<Ok<ImportResult>, BadRequest<string>>> ImportAsync(
         IFormFile file,
         [FromForm] string account,
-        ICsvStructureDetector detectionService,
         CsvImporter csvImporter,
-        ITransactionEnhancer enhancer,
+        IImageImporter imageImporter,
         BudgetTrackerContext context,
-        ClaimsPrincipal claimsPrincipal)
+        ITransactionEnhancer enhancementService,
+        ClaimsPrincipal claimsPrincipal,
+        ICsvStructureDetector detectionService)
     {
-        var validationResult = ValidateFileInput(file, account);
+        var validationResult = ValidateFileInput(file);
         if (validationResult != null)
             return validationResult;
+
+        if (string.IsNullOrWhiteSpace(account))
+            return TypedResults.BadRequest("Account name is required");
 
         try
         {
@@ -47,25 +51,26 @@ public static class ImportApi
 
             await using var stream = file.OpenReadStream();
 
-            var detectionResult = await detectionService.DetectStructureAsync(stream);
+            var (result, transactions, detectionResult) = await ProcessFileAsync(
+                stream, file.FileName, userId, account, csvImporter, imageImporter, detectionService);
 
-            if (detectionResult.ConfidenceScore < 85)
+            if (detectionResult != null && detectionResult.ConfidenceScore < 85)
             {
                 return TypedResults.BadRequest(
                     $"Could not reliably detect CSV structure (confidence: {detectionResult.ConfidenceScore:F0}%). " +
                     (detectionResult.ErrorMessage ?? "Please ensure the file contains Date, Description, and Amount columns."));
             }
 
-            stream.Position = 0;
-            var (result, transactions) = await csvImporter.ParseCsvAsync(stream, file.FileName, userId, account, detectionResult);
-
-            result.DetectionMethod = detectionResult.Method.ToString();
-            result.DetectionConfidence = detectionResult.ConfidenceScore;
+            if (detectionResult != null)
+            {
+                result.DetectionMethod = detectionResult.Method.ToString();
+                result.DetectionConfidence = detectionResult.ConfidenceScore;
+            }
 
             if (transactions.Any())
             {
                 var descriptions = transactions.Select(t => t.Description).ToList();
-                var enhancements = await enhancer.EnhanceDescriptionsAsync(descriptions, account, userId, sessionHash);
+                var enhancements = await enhancementService.EnhanceDescriptionsAsync(descriptions, account, userId, sessionHash);
 
                 var enhancementResults = new List<TransactionEnhancementResult>();
 
@@ -102,6 +107,37 @@ public static class ImportApi
         {
             return TypedResults.BadRequest($"Import failed: {ex.Message}");
         }
+    }
+
+    private static async Task<(ImportResult, List<Transaction>, CsvStructureDetectionResult?)> ProcessFileAsync(
+        Stream stream, string fileName, string userId, string account,
+        CsvImporter csvImporter, IImageImporter imageImporter, ICsvStructureDetector detectionService)
+    {
+        var fileExtension = Path.GetExtension(fileName).ToLowerInvariant();
+        return fileExtension switch
+        {
+            ".csv" => await ProcessCsvFileAsync(stream, fileName, userId, account, csvImporter, detectionService),
+            ".png" or ".jpg" or ".jpeg" => await ProcessImageFileAsync(stream, fileName, userId, account, imageImporter),
+            _ => throw new InvalidOperationException("Unsupported file type")
+        };
+    }
+
+    private static async Task<(ImportResult, List<Transaction>, CsvStructureDetectionResult?)> ProcessCsvFileAsync(
+        Stream stream, string fileName, string userId, string account,
+        CsvImporter csvImporter, ICsvStructureDetector detectionService)
+    {
+        var detectionResult = await detectionService.DetectStructureAsync(stream);
+        stream.Position = 0;
+        var (result, transactions) = await csvImporter.ParseCsvAsync(stream, fileName, userId, account, detectionResult);
+        return (result, transactions, detectionResult);
+    }
+
+    private static async Task<(ImportResult, List<Transaction>, CsvStructureDetectionResult?)> ProcessImageFileAsync(
+        Stream stream, string fileName, string userId, string account,
+        IImageImporter imageImporter)
+    {
+        var (result, transactions) = await imageImporter.ProcessImageAsync(stream, fileName, userId, account);
+        return (result, transactions, null);
     }
 
     private static async Task<Results<Ok<EnhanceImportResult>, BadRequest<string>>> EnhanceImportAsync(
@@ -165,19 +201,20 @@ public static class ImportApi
         return Convert.ToHexString(hash)[..12];
     }
 
-    private static BadRequest<string>? ValidateFileInput(IFormFile file, string account)
+    private static BadRequest<string>? ValidateFileInput(IFormFile file)
     {
         if (file == null || file.Length == 0)
-            return TypedResults.BadRequest("No file uploaded");
+            return TypedResults.BadRequest("Please select a valid file.");
 
-        if (!file.FileName.EndsWith(".csv", StringComparison.OrdinalIgnoreCase))
-            return TypedResults.BadRequest("Only CSV files are supported");
+        const int maxFileSize = 10 * 1024 * 1024; // 10MB
+        if (file.Length > maxFileSize)
+            return TypedResults.BadRequest("File size must be less than 10MB.");
 
-        if (file.Length > 10 * 1024 * 1024)
-            return TypedResults.BadRequest("File size exceeds 10MB limit");
+        var allowedExtensions = new[] { ".csv", ".png", ".jpg", ".jpeg" };
+        var fileExtension = Path.GetExtension(file.FileName).ToLowerInvariant();
 
-        if (string.IsNullOrWhiteSpace(account))
-            return TypedResults.BadRequest("Account name is required");
+        if (!allowedExtensions.Contains(fileExtension))
+            return TypedResults.BadRequest("Only CSV files and images (PNG, JPG, JPEG) are supported.");
 
         return null;
     }

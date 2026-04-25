@@ -24,12 +24,27 @@ function FileUpload({ className = '' }: FileUploadProps) {
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const [minConfidenceScore, setMinConfidenceScore] = useState(0.7);
   const [enhanceResult, setEnhanceResult] = useState<EnhanceImportResult | null>(null);
-  const [currentPhase, setCurrentPhase] = useState<'uploading' | 'detecting' | 'parsing' | 'enhancing' | 'complete'>('uploading');
+  const [currentPhase, setCurrentPhase] = useState<'uploading' | 'detecting' | 'parsing' | 'extracting' | 'enhancing' | 'complete'>('uploading');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
   const { showSuccess, showError } = useToast();
 
   const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+
+  const isImageFile = (fileName: string): boolean => {
+    const name = fileName.toLowerCase();
+    return name.endsWith('.png') || name.endsWith('.jpg') || name.endsWith('.jpeg');
+  };
+
+  const getFileTypeIcon = (fileName: string): string => {
+    if (isImageFile(fileName)) return '🖼️';
+    return '📊';
+  };
+
+  const getFileTypeLabel = (fileName: string): string => {
+    if (isImageFile(fileName)) return 'Bank Statement Image';
+    return 'CSV Bank Statement';
+  };
 
   useEffect(() => {
     const fetchXsrfToken = async () => {
@@ -43,8 +58,11 @@ function FileUpload({ className = '' }: FileUploadProps) {
   }, []);
 
   const validateFile = (file: File): string | null => {
-    if (!file.name.toLowerCase().endsWith('.csv')) {
-      return 'Please select a CSV file';
+    const validExtensions = ['.csv', '.png', '.jpg', '.jpeg'];
+    const fileName = file.name.toLowerCase();
+
+    if (!validExtensions.some(ext => fileName.endsWith(ext))) {
+      return 'Please select a CSV file or bank statement image (PNG, JPG, JPEG)';
     }
     if (file.size > MAX_FILE_SIZE) {
       return 'File size must be less than 10MB';
@@ -101,6 +119,8 @@ function FileUpload({ className = '' }: FileUploadProps) {
       formData.append('file', selectedFile);
       formData.append('account', account.trim());
 
+      const isImage = isImageFile(selectedFile.name);
+
       const result = await transactionsApi.importTransactions({
         formData,
         onUploadProgress: (progressEvent) => {
@@ -111,9 +131,9 @@ function FileUpload({ className = '' }: FileUploadProps) {
 
           if (progress < 20) {
             setCurrentPhase('uploading');
-          } else if (progress < 40) {
-            setCurrentPhase('detecting');
-          } else if (progress < 70) {
+          } else if (progress < 60) {
+            setCurrentPhase(isImage ? 'extracting' : 'detecting');
+          } else if (progress < 85 && !isImage) {
             setCurrentPhase('parsing');
           } else if (progress < 100) {
             setCurrentPhase('enhancing');
@@ -125,10 +145,10 @@ function FileUpload({ className = '' }: FileUploadProps) {
 
       setImportResult(result);
       setCurrentStep('preview');
-      showSuccess(`Imported ${result.importedCount} transactions - review AI enhancements below`);
+      showSuccess(`Successfully imported ${result.importedCount} transactions from ${getFileTypeLabel(selectedFile.name).toLowerCase()}`);
     } catch (error) {
       console.error('Import error:', error);
-      showError('Import Failed', getErrorMessage(error));
+      showError('Import Failed', getErrorMessage(error, selectedFile?.name));
     } finally {
       setIsUploading(false);
       setUploadProgress(0);
@@ -169,8 +189,18 @@ function FileUpload({ className = '' }: FileUploadProps) {
     }
   }, [importResult, minConfidenceScore, showSuccess, showError, navigate]);
 
-  const getErrorMessage = (error: unknown): string => {
+  const getErrorMessage = (error: unknown, fileName?: string): string => {
     const message = (error as Error)?.message || 'Failed to import the file';
+    const isImage = fileName ? isImageFile(fileName) : false;
+
+    if (isImage) {
+      if (message.includes('confidence')) {
+        return 'The image quality may be too low to extract transactions accurately. Try a clearer image.';
+      }
+      if (message.includes('processing error')) {
+        return 'Could not process the bank statement image. Ensure it shows a clear list of transactions.';
+      }
+    }
 
     if (message.includes('Unable to automatically detect CSV structure')) {
       return 'Could not detect the CSV format. Please ensure your file has clear column headers (Date, Description, Amount).';
@@ -249,38 +279,49 @@ function FileUpload({ className = '' }: FileUploadProps) {
             <input
               ref={fileInputRef}
               type="file"
-              accept=".csv"
+              accept=".csv,.png,.jpg,.jpeg"
               onChange={handleFileInputChange}
               className="hidden"
             />
 
             <div className="space-y-4">
-              <div className="mx-auto h-12 w-12 text-gray-400">
-                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
-                </svg>
-              </div>
-
-              <div>
-                <p className="text-lg font-medium text-gray-900">
-                  {selectedFile ? selectedFile.name : 'Upload Bank Statement'}
-                </p>
-                <p className="text-sm text-gray-500">
-                  {selectedFile
-                    ? `${(selectedFile.size / 1024).toFixed(1)} KB`
-                    : 'Drag and drop or click to browse'}
-                </p>
-              </div>
-
-              {!selectedFile && (
-                <button
-                  onClick={handleBrowseClick}
-                  className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700"
-                >
-                  Browse Files
-                </button>
+              {selectedFile ? (
+                <div className="flex items-center gap-3 justify-center">
+                  <span className="text-4xl">{getFileTypeIcon(selectedFile.name)}</span>
+                  <div className="text-left">
+                    <p className="text-lg font-medium text-gray-900">{selectedFile.name}</p>
+                    <p className="text-xs text-gray-500">
+                      {getFileTypeLabel(selectedFile.name)} • {(selectedFile.size / 1024).toFixed(1)} KB
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div className="mx-auto h-12 w-12 text-gray-400">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 48 48">
+                      <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </div>
+                  <div>
+                    <p className="text-lg font-medium text-gray-900">Upload Bank Statement</p>
+                    <p className="text-sm text-gray-500">Drag and drop or click to browse</p>
+                    <p className="mt-1 text-xs text-gray-400">CSV files or bank statement images (PNG, JPG)</p>
+                  </div>
+                  <button
+                    onClick={handleBrowseClick}
+                    className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700"
+                  >
+                    Browse Files
+                  </button>
+                </>
               )}
             </div>
+
+            {selectedFile && isImageFile(selectedFile.name) && (
+              <div className="mt-4 p-2 bg-blue-50 rounded text-xs text-blue-700">
+                <strong>Tip:</strong> For best results, ensure the image clearly shows transaction details including dates, descriptions, and amounts.
+              </div>
+            )}
           </div>
 
           {selectedFile && (
@@ -335,6 +376,7 @@ function FileUpload({ className = '' }: FileUploadProps) {
                         {currentPhase === 'uploading' ? 'Uploading...' :
                          currentPhase === 'detecting' ? 'Detecting...' :
                          currentPhase === 'parsing' ? 'Parsing...' :
+                         currentPhase === 'extracting' ? 'Extracting...' :
                          currentPhase === 'enhancing' ? 'Enhancing...' : 'Processing...'}
                       </span>
                     </span>

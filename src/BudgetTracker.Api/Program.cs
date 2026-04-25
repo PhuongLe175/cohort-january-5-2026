@@ -47,6 +47,7 @@ builder.Services.AddDbContext<BudgetTrackerContext>(options =>
 
 // Add CSV Import Service
 builder.Services.AddScoped<CsvImporter>();
+builder.Services.AddScoped<IImageImporter, ImageImporter>();
 builder.Services.AddScoped<ITransactionEnhancer, TransactionEnhancer>();
 builder.Services.AddScoped<ICsvStructureDetector, CsvStructureDetector>();
 builder.Services.AddScoped<ICsvDetector, CsvDetector>();
