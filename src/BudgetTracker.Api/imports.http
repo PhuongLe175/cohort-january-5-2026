@@ -27,44 +27,7 @@ Content-Type: application/json
 
 {
   "importSessionHash": "C6691CC11C6E",
-  "enhancements": [
-    {
-      "transactionId": "aceb4a7c-22da-4f17-bcd5-062044867a5a",
-      "importSessionHash": "C6691CC11C6E",
-      "transactionIndex": 0,
-      "originalDescription": "AMZN",
-      "enhancedDescription": "Amazon Purchase",
-      "suggestedCategory": "Shopping",
-      "confidenceScore": 0.85
-    },
-    {
-      "transactionId": "a5dea5ca-a34a-4bce-9514-6649eaa71374",
-      "importSessionHash": "C6691CC11C6E",
-      "transactionIndex": 1,
-      "originalDescription": "STARBUCKS COFFEE #1234",
-      "enhancedDescription": "Starbucks Coffee",
-      "suggestedCategory": "Food & Drink",
-      "confidenceScore": 0.95
-    },
-    {
-      "transactionId": "0494d6e6-a4be-4186-ae32-6191da46cfa4",
-      "importSessionHash": "C6691CC11C6E",
-      "transactionIndex": 2,
-      "originalDescription": "DD VODAFONE PORTU 222111000",
-      "enhancedDescription": "Vodafone Portugal - Direct Debit",
-      "suggestedCategory": "Utilities",
-      "confidenceScore": 0.9
-    },
-    {
-      "transactionId": "3eb5c503-b539-479a-acde-bd1b93034f29",
-      "importSessionHash": "C6691CC11C6E",
-      "transactionIndex": 3,
-      "originalDescription": "NFLX Subscription",
-      "enhancedDescription": "Netflix Subscription",
-      "suggestedCategory": "Entertainment",
-      "confidenceScore": 0.9
-    }
-  ],
+  "enhancements": [],
   "minConfidenceScore": 0.5,
   "applyEnhancements": true
 }
@@ -72,4 +35,28 @@ Content-Type: application/json
 ### View Enhanced Transactions
 GET http://localhost:5295/api/transactions
 X-API-Key: test-key-user1
+
+
+### Test RAG enhancement with new similar transactions
+POST http://localhost:5295/api/transactions/import
+X-API-Key: test-key-user1
+Content-Type: multipart/form-data; boundary=WebAppBoundary
+
+--WebAppBoundary
+Content-Disposition: form-data; name="account"
+
+Checking Account
+--WebAppBoundary
+Content-Disposition: form-data; name="file"; filename="rag-test-transactions.csv"
+Content-Type: text/csv
+
+Date,Description,Amount,Balance
+2025-01-15,STARBUCKS COFFEE #9999,-6.50,1310.07
+2025-01-16,SHELL OIL #5678,-48.00,1262.07
+2025-01-17,AMZN MKTP US*111222333,-31.99,1230.08
+2025-01-18,TESCO SUPERMERCADO,-82.15,1147.93
+2025-01-19,VODAFONE PORT DD,-35.99,1111.94
+--WebAppBoundary--
+
+
 
