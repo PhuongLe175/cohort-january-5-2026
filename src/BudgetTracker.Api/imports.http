@@ -59,4 +59,75 @@ Date,Description,Amount,Balance
 --WebAppBoundary--
 
 
+### Create initial transactions for context
+POST http://localhost:5295/api/transactions/import
+X-API-Key: test-key-user1
+Content-Type: multipart/form-data; boundary=WebAppBoundary
 
+--WebAppBoundary
+Content-Disposition: form-data; name="account"
+
+Checking Account
+--WebAppBoundary
+Content-Disposition: form-data; name="file"; filename="historical-context.csv"
+Content-Type: text/csv
+
+Date,Description,Amount,Balance
+2024-12-01,STARBUCKS COFFEE #4567,-5.50,1500.00
+2024-12-02,SHELL OIL #1234,-45.00,1455.00
+2024-12-03,AMZN MKTP US*567890123,-23.99,1431.01
+2024-12-04,TESCO PORTUGAL,-78.45,1352.56
+2024-12-05,VODAFONE DIRECT DEBIT,-35.99,1316.57
+--WebAppBoundary--
+
+
+
+### Test RAG enhancement with new similar transactions
+POST http://localhost:5295/api/transactions/import
+X-API-Key: test-key-user1
+Content-Type: multipart/form-data; boundary=WebAppBoundary
+
+--WebAppBoundary
+Content-Disposition: form-data; name="account"
+
+Checking Account
+--WebAppBoundary
+Content-Disposition: form-data; name="file"; filename="rag-test-transactions.csv"
+Content-Type: text/csv
+
+Date,Description,Amount,Balance
+2025-01-15,STARBUCKS COFFEE #9999,-6.50,1310.07
+2025-01-16,SHELL OIL #5678,-48.00,1262.07
+2025-01-17,AMZN MKTP US*111222333,-31.99,1230.08
+2025-01-18,TESCO SUPERMERCADO,-82.15,1147.93
+2025-01-19,VODAFONE PORT DD,-35.99,1111.94
+--WebAppBoundary--
+
+
+
+### NLQ - coffee query
+POST http://localhost:5295/api/query/ask
+X-API-Key: test-key-user1
+Content-Type: application/json
+
+{
+  "query": "Show me all my coffee purchases"
+}
+
+### NLQ - biggest expense
+POST http://localhost:5295/api/query/ask
+X-API-Key: test-key-user1
+Content-Type: application/json
+
+{
+  "query": "What was my biggest expense?"
+}
+
+### NLQ - category spending
+POST http://localhost:5295/api/query/ask
+X-API-Key: test-key-user1
+Content-Type: application/json
+
+{
+  "query": "How much did I spend on entertainment?"
+}

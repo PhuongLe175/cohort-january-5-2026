@@ -1,5 +1,6 @@
 using BudgetTracker.Api.AntiForgery;
 using BudgetTracker.Api.Auth;
+using BudgetTracker.Api.Features.Intelligence.Query;
 using BudgetTracker.Api.Features.Intelligence.Search;
 using BudgetTracker.Api.Features.Transactions;
 using BudgetTracker.Api.Features.Transactions.Import.Detection;
@@ -135,13 +136,15 @@ builder.Services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(sp 
 {
     var config = sp.GetRequiredService<IOptions<AzureAiConfiguration>>().Value;
     return new AzureOpenAIClient(
-            new Uri(config.Endpoint),
-            new System.ClientModel.ApiKeyCredential(config.ApiKey))
+            new Uri(config.EmbeddingEndpoint),
+            new System.ClientModel.ApiKeyCredential(config.EmbeddingApiKey))
         .GetEmbeddingClient(config.EmbeddingDeploymentName)
         .AsIEmbeddingGenerator();
 });
 
 builder.Services.AddScoped<IAzureEmbeddingService, AzureEmbeddingService>();
+builder.Services.AddScoped<ISemanticSearchService, SemanticSearchService>();
+builder.Services.AddScoped<IQueryAssistantService, QueryAssistantService>();
 builder.Services.AddHostedService<EmbeddingBackgroundService>();
 
 
@@ -181,6 +184,7 @@ app
     .MapGroup("/api")
     .MapAntiForgeryEndpoints()
     .MapAuthEndpoints()
-    .MapTransactionEndpoints();
+    .MapTransactionEndpoints()
+    .MapQueryEndpoints();
 
 app.Run();
