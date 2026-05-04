@@ -1,18 +1,32 @@
+import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import Header from '../shared/components/layout/Header';
-import { QueryAssistant } from '../features/intelligence';
+import { QueryAssistant, RecommendationsCard, intelligenceApi } from '../features/intelligence';
+import type { ProactiveRecommendation } from '../features/intelligence';
 
-export async function loader() {
+export function loader() {
   return {};
 }
 
 export default function Dashboard() {
+  const [recommendations, setRecommendations] = useState<ProactiveRecommendation[]>([]);
+
+  useEffect(() => {
+    intelligenceApi.getRecommendations().then(setRecommendations).catch(() => {});
+  }, []);
+
   return (
     <div className="px-4 py-6 sm:px-0">
       <Header
         title="Dashboard"
         subtitle="Welcome to your budget tracker"
       />
+
+      {recommendations.length > 0 && (
+        <div className="mb-6">
+          <RecommendationsCard recommendations={recommendations} />
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
         <QueryAssistant className="lg:col-span-2" />

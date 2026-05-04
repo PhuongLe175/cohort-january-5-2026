@@ -22,9 +22,26 @@ export interface QueryResponse {
   transactions?: TransactionDto[];
 }
 
+export interface ProactiveRecommendation {
+  id: string;
+  title: string;
+  description: string;
+  type: 'SpendingAlert' | 'SavingsOpportunity' | 'BudgetTip' | 'TrendInsight' | 'CategoryOptimization';
+  priority: 'Low' | 'Medium' | 'High';
+  amount?: number;
+  category?: string;
+  createdAt: string;
+  expiresAt?: string;
+}
+
 export const intelligenceApi = {
   askQuery: async (query: string): Promise<QueryResponse> => {
     const response = await api.post<QueryResponse>('/query/ask', { query });
+    return response.data;
+  },
+
+  getRecommendations: async (): Promise<ProactiveRecommendation[]> => {
+    const response = await api.get<ProactiveRecommendation[]>('/recommendations');
     return response.data;
   }
 };
