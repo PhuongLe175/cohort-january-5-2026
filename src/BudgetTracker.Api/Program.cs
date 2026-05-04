@@ -1,6 +1,8 @@
 using BudgetTracker.Api.AntiForgery;
 using BudgetTracker.Api.Auth;
+using BudgetTracker.Api.Features.Intelligence;
 using BudgetTracker.Api.Features.Intelligence.Query;
+using BudgetTracker.Api.Features.Intelligence.Recommendations;
 using BudgetTracker.Api.Features.Intelligence.Search;
 using BudgetTracker.Api.Features.Transactions;
 using BudgetTracker.Api.Features.Transactions.Import.Detection;
@@ -146,6 +148,9 @@ builder.Services.AddScoped<IAzureEmbeddingService, AzureEmbeddingService>();
 builder.Services.AddScoped<ISemanticSearchService, SemanticSearchService>();
 builder.Services.AddScoped<IQueryAssistantService, QueryAssistantService>();
 builder.Services.AddHostedService<EmbeddingBackgroundService>();
+builder.Services.AddScoped<IRecommendationRepository, RecommendationAgent>();
+builder.Services.AddScoped<IRecommendationWorker, RecommendationProcessor>();
+builder.Services.AddHostedService<RecommendationBackgroundService>();
 
 
 var app = builder.Build();
@@ -185,6 +190,6 @@ app
     .MapAntiForgeryEndpoints()
     .MapAuthEndpoints()
     .MapTransactionEndpoints()
-    .MapQueryEndpoints();
+    .MapIntelligenceEndpoints();
 
 app.Run();
